@@ -27,3 +27,25 @@ jobs:
       changed_folders: ${{ steps.check.outputs.folders }}
       run_tf: ${{ steps.check.outputs.run_tf }}
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-dept: 0
+         
+      - name: Get terraform plan apply folder path
+        id: check
+        run: |
+          echo "Checking for modified directories..."
+          git fetch --prune --unshallow
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '\.tf$' | sed 's|/[^/]*\.tf$||' | sort -u > folders.txt
+          if [ -s folders.txt ]; then
+            echo "Modified directories:"
+            cat folders.txt
+            echo "::set-output name=folders::$(cat folders.txt)"
+            echo "::set-output name=run_tf::true"
+          else
+            echo "No modified directories found."
+            echo "::set-output name=run_tf::false"
+          fi
