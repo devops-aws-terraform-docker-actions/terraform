@@ -21,31 +21,82 @@ env:
   AWS_REGION: 'ap-southeast-1'  # Update with your AWS region
 
 jobs:
-  check:
-    name: fetch modified directories
-    output: 
-      changed_folders: ${{ steps.check.outputs.folders }}
-      run_tf: ${{ steps.check.outputs.run_tf }}
+  detect-changed-dirs:
+    name: Detect Changed Directories
     runs-on: ubuntu-latest
-
+    outputs:
+      dirs: ${{ steps.find-dirs.outputs.dirs }}
+      
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
-          fetch-dept: 0
-         
-      - name: Get terraform plan apply folder path
-        id: check
+          fetch-depth: 0  # Fetch all history to properly detect changes
+
+      - name: Find Changed Terraform Directories
+        id: find-dirs
         run: |
-          echo "Checking for modified directories..."
-          git fetch --prune --unshallow
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '\.tf$' | sed 's|/[^/]*\.tf$||' | sort -u > folders.txt
-          if [ -s folders.txt ]; then
-            echo "Modified directories:"
-            cat folders.txt
-            echo "::set-output name=folders::$(cat folders.txt)"
-            echo "::set-output name=run_tf::true"
+          # For PRs
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '\.tf$|\.tfvars$' || echo "")
+          # For push events
           else
-            echo "No modified directories found."
-            echo "::set-output name=run_tf::false"
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep -E '\.tf$|\.tfvars$' || echo "")
           fi
+          
+          # If workflow_dispatch, consider all directories
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            DIRS=$(find . -type f -name "*.tf" -o -name "*.tfvars" | xargs dirname | sort -u | sed 's/^\.\///' | jq -R -s -c 'split("\n")[:-1]')
+          # For regular events with changes
+          elif [ -n "$CHANGED_FILES" ]; then
+            DIRS=$(echo "$CHANGED_FILES" | xargs dirname | sort -u | sed 's/^\.\///' | jq -R -s -c 'split("\n")[:-1]')
+          # No changes detected
+          else
+            DIRS="[]"
+          fi
+          
+          echo "dirs=$DIRS" >> $GITHUB_OUTPUT
+          echo "Changed directories: $DIRS"
+
+  terraform-plan:
+    name: Terraform Plan
+    needs: detect-changed-dirs
+    if: ${{ needs.detect-changed-dirs.outputs.dirs != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory: ${{ fromJSON(needs.detect-changed-dirs.outputs.dirs) }}
+      fail-fast: false
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        working-directory: ${{ matrix.directory }}
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ${{ matrix.directory }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ matrix.directory }}
+        run: terraform plan -no-color
+        continue-on-error: true
+        
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
