@@ -1,6 +1,8 @@
 name: Terraform Plan on Pull Request test test
 
 on:
+  push:
+    branches: [ '**' ]  # Triggered on push to any branch
   pull_request:
     branches:
       - '**'
