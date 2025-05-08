@@ -4,15 +4,15 @@ on:
   push:
     branches: [ '**' ]  # Triggered on push to any branch
     paths:
-      - '*/**.tf'  # Any Terraform file in any subdirectory
-      - '*/**.tfvars'  # Any Terraform state file in any subdirectory
+      - 'services/**.tf'  # Any Terraform file in any subdirectory
+      - 'services/**.tfvars'  # Any Terraform state file in any subdirectory
       - '.github/workflows/plan.yml'
   pull_request:
     branches:
       - '**'
     paths:
-      - '*/**.tf'  # Any Terraform file in any subdirectory
-      - '*/**.tfvars'  # Any Terraform state file in any subdirectory
+      - 'services/**.tf'  # Any Terraform file in any subdirectory
+      - 'services/**.tfvars'  # Any Terraform state file in any subdirectory
       - '.github/workflows/plan.yml'
     types: [opened, synchronize, reopened]
 
